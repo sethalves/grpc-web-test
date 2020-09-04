@@ -1,312 +1,325 @@
-# gRPC Web
+# gRPC-Web Hello World Guide
 
-A JavaScript implementation of [gRPC][] for browser clients. For more information,
-including a **quick start**, see the [gRPC-web documentation][grpc-web-docs].
+This guide is intended to help you get started with gRPC-Web with a simple
+Hello World example. For more information about the gRPC-Web project as a
+whole, please visit the [main repo](https://github.com/grpc/grpc-web).
 
-gRPC-web clients connect to gRPC services via a special proxy; by default,
-gRPC-web uses [Envoy][].
-
-In the future, we expect gRPC-web to be supported in language-specific web
-frameworks for languages such as Python, Java, and Node. For details, see the
-[roadmap](doc/roadmap.md).
-
-## Quick Start
-
-Eager to get started? Try the [Hello World example][]. From this example, you'll
-learn how to do the following:
-
- - Define your service using protocol buffers
- - Implement a simple gRPC Service using NodeJS
- - Configure the Envoy proxy
- - Generate protobuf message classes and client service stub for the client
- - Compile all the JS dependencies into a static library that can be consumed
-   by the browser easily
-
-## Advanced Demo: Browser Echo App
-
-You can also try to run a more advanced Echo app from the browser with a
-streaming example.
-
-From the repo root directory:
+All the code for this example can be found in this current directory.
 
 ```sh
-$ docker-compose pull node-server envoy commonjs-client
-$ docker-compose up node-server envoy commonjs-client
+$ cd net/grpc/gateway/examples/helloworld
 ```
 
-Open a browser tab, and visit http://localhost:8081/echotest.html.
+## Define the Service
 
-To shutdown: `docker-compose down`.
-
-## Runtime Library
-
-The gRPC-web runtime library is available at `npm`:
-
-```sh
-$ npm i grpc-web
-```
-
-## Code Generator Plugin
-
-You can download the `protoc-gen-grpc-web` protoc plugin from our
-[release](https://github.com/grpc/grpc-web/releases) page:
-
-If you don't already have `protoc` installed, you will have to download it
-first from [here](https://github.com/protocolbuffers/protobuf/releases).
-
-Make sure they are both executable and are discoverable from your PATH.
-
-For example, in MacOS, you can do:
-
-```
-$ sudo mv ~/Downloads/protoc-gen-grpc-web-1.2.1-darwin-x86_64 \
-    /usr/local/bin/protoc-gen-grpc-web
-$ chmod +x /usr/local/bin/protoc-gen-grpc-web
-```
-
-## Client Configuration Options
-
-Typically, you will run the following command to generate the proto messages
-and the service client stub from your `.proto` definitions:
-
-```sh
-$ protoc -I=$DIR echo.proto \
-    --js_out=import_style=commonjs:$OUT_DIR \
-    --grpc-web_out=import_style=commonjs,mode=grpcwebtext:$OUT_DIR
-```
-
-You can then use Browserify, Webpack, Closure Compiler, etc. to resolve imports
-at compile time.
-
-### Import Style
-
-`import_style=closure`: The default generated code has
-[Closure](https://developers.google.com/closure/library/) `goog.require()`
-import style.
-
-`import_style=commonjs`: The
-[CommonJS](https://requirejs.org/docs/commonjs.html) style `require()` is
-also supported.
-
-`import_style=commonjs+dts`: (Experimental) In addition to above, a `.d.ts`
-typings file will also be generated for the protobuf messages and service stub.
-
-`import_style=typescript`: (Experimental) The service stub will be generated
-in TypeScript. See **TypeScript Support** below for information on how to
-generate TypeScript files.
-
-**Note: The `commonjs+dts` and `typescript` styles are only supported by
-`--grpc-web_out=import_style=...`, not by `--js_out=import_style=...`.**
-
-### Wire Format Mode
-
-For more information about the gRPC-web wire format, see the
-[specification](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md#protocol-differences-vs-grpc-over-http2).
-
-`mode=grpcwebtext`: The default generated code sends the payload in the
-`grpc-web-text` format.
-
-  - `Content-type: application/grpc-web-text`
-  - Payload are base64-encoded.
-  - Both unary and server streaming calls are supported.
-
-`mode=grpcweb`: A binary protobuf format is also supported.
-
-  - `Content-type: application/grpc-web+proto`
-  - Payload are in the binary protobuf format.
-  - Only unary calls are supported for now.
-
-## How It Works
-
-Let's take a look at how gRPC-web works with a simple example. You can find out
-how to build, run and explore the example yourself in
-[Build and Run the Echo Example](net/grpc/gateway/examples/echo).
-
-### 1. Define your service
-
-The first step when creating any gRPC service is to define it. Like all gRPC
-services, gRPC-web uses
-[protocol buffers](https://developers.google.com/protocol-buffers) to define
-its RPC service methods and their message request and response types.
+First, let's define a gRPC service using
+[protocol buffers](https://developers.google.com/protocol-buffers/). Put this
+in the `helloworld.proto` file. Here we define a request message, a response
+message, and a service with one RPC method: `SayHello`.
 
 ```protobuf
-message EchoRequest {
+syntax = "proto3";
+
+package helloworld;
+
+service Greeter {
+  rpc SayHello (HelloRequest) returns (HelloReply);
+}
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
   string message = 1;
 }
+```
 
-...
+## Implement the Service
 
-service EchoService {
-  rpc Echo(EchoRequest) returns (EchoResponse);
+Then, we need to implement the gRPC Service. In this example, we will use
+NodeJS. Put this in a `server.js` file. Here, we receive the client request,
+and we can access the message field via `call.request.name`. Then we construct
+a nice response and send it back to the client via `callback(null, response)`.
 
-  rpc ServerStreamingEcho(ServerStreamingEchoRequest)
-      returns (stream ServerStreamingEchoResponse);
+```js
+var PROTO_PATH = __dirname + '/helloworld.proto';
+
+var grpc = require('@grpc/grpc-js');
+var protoLoader = require('@grpc/proto-loader');
+var packageDefinition = protoLoader.loadSync(
+    PROTO_PATH,
+    {keepCase: true,
+     longs: String,
+     enums: String,
+     defaults: true,
+     oneofs: true
+    });
+var protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
+var helloworld = protoDescriptor.helloworld;
+
+function doSayHello(call, callback) {
+  callback(null, {
+    message: 'Hello! ' + call.request.name
+  });
+}
+
+function getServer() {
+  var server = new grpc.Server();
+  server.addService(helloworld.Greeter.service, {
+    sayHello: doSayHello,
+  });
+  return server;
+}
+
+if (require.main === module) {
+  var server = getServer();
+  server.bindAsync(
+    '0.0.0.0:9090', grpc.ServerCredentials.createInsecure(), (err, port) => {
+      assert.ifError(err);
+      server.start();
+  });
+}
+
+exports.getServer = getServer;
+```
+
+## Configure the Proxy
+
+Next up, we need to configure the Envoy proxy to forward the browser's gRPC-Web
+requests to the backend. Put this in an `envoy.yaml` file. Here we configure
+Envoy to listen at port `:8080`, and forward any gRPC-Web requests to a
+cluster at port `:9090`.
+
+```yaml
+static_resources:
+  listeners:
+  - name: listener_0
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 8080 }
+    filter_chains:
+    - filters:
+      - name: envoy.http_connection_manager
+        config:
+          codec_type: auto
+          stat_prefix: ingress_http
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: local_service
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/" }
+                route:
+                  cluster: greeter_service
+                  max_grpc_timeout: 0s
+              cors:
+                allow_origin_string_match:
+                - prefix: "*"
+                allow_methods: GET, PUT, DELETE, POST, OPTIONS
+                allow_headers: keep-alive,user-agent,cache-control,content-type,content-transfer-encoding,custom-header-1,x-accept-content-transfer-encoding,x-accept-response-streaming,x-user-agent,x-grpc-web,grpc-timeout
+                max_age: "1728000"
+                expose_headers: custom-header-1,grpc-status,grpc-message
+          http_filters:
+          - name: envoy.grpc_web
+          - name: envoy.cors
+          - name: envoy.router
+  clusters:
+  - name: greeter_service
+    connect_timeout: 0.25s
+    type: logical_dns
+    http2_protocol_options: {}
+    lb_policy: round_robin
+    hosts: [{ socket_address: { address: 0.0.0.0, port_value: 9090 }}]
+```
+
+> NOTE: As per [this issue](https://github.com/grpc/grpc-web/issues/436): if
+> you are running Docker on Mac/Windows, change the last line to
+>
+> ```yaml
+>     ...
+>     hosts: [{ socket_address: { address: host.docker.internal, port_value: 9090 }}]
+> ```
+>
+> or if your version of Docker on Mac older then v18.03.0, change it to:
+>
+> ```yaml
+>     ...
+>     hosts: [{ socket_address: { address: docker.for.mac.localhost, port_value: 9090 }}]
+> ```
+
+## Write Client Code
+
+Now, we are ready to write some client code! Put this in a `client.js` file.
+
+```js
+const {HelloRequest, HelloReply} = require('./helloworld_pb.js');
+const {GreeterClient} = require('./helloworld_grpc_web_pb.js');
+
+var client = new GreeterClient('http://localhost:8080');
+
+var request = new HelloRequest();
+request.setName('World');
+
+client.sayHello(request, {}, (err, response) => {
+  console.log(response.getMessage());
+});
+```
+
+The classes `HelloRequest`, `HelloReply` and `GreeterClient` we import here are
+generated for you by the `protoc` generator utility (which we will cover in the
+next section) from the `helloworld.proto` file we defined earlier.
+
+Then we instantiate a `GreeterClient` instance, set the field in the
+`HelloRequest` protobuf object, and we can make a gRPC call via
+`client.sayHello()`, just like how we defined in the `helloworld.proto` file.
+
+
+You will need a `package.json` file. This is needed for both the `server.js` and
+the `client.js` files.
+
+```json
+{
+  "name": "grpc-web-simple-example",
+  "version": "0.1.0",
+  "description": "gRPC-Web simple example",
+  "main": "server.js",
+  "devDependencies": {
+    "@grpc/grpc-js": "~1.0.5",
+    "@grpc/proto-loader": "~0.5.4",
+    "async": "~1.5.2",
+    "google-protobuf": "~3.12.0",
+    "grpc-web": "~1.2.1",
+    "lodash": "~4.17.0",
+    "webpack": "~4.43.0",
+    "webpack-cli": "~3.3.11"
+  }
 }
 ```
 
-### 2. Run the server and proxy
+And finally a simple `index.html` file.
 
-Next you need to have a gRPC server that implements the service interface and a
-gateway proxy that allows the client to connect to the server. Our example
-builds a simple Node gRPC backend server and the Envoy proxy.
-
-For the Echo service: see the
-[service implementations](net/grpc/gateway/examples/echo/node-server/server.js).
-
-For the Envoy proxy: see the
-[config yaml file](net/grpc/gateway/examples/echo/envoy.yaml).
-
-### 3. Write your JS client
-
-Once the server and gateway are up and running, you can start making gRPC calls
-from the browser!
-
-Create your client:
-
-```js
-var echoService = new proto.mypackage.EchoServiceClient(
-  'http://localhost:8080');
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>gRPC-Web Example</title>
+<script src="./dist/main.js"></script>
+</head>
+<body>
+  <p>Open up the developer console and see the logs for the output.</p>
+</body>
+</html>
 ```
 
-Make a unary RPC call:
+The `./dist/main.js` file will be generated by `webpack` (which will be covered
+in the next section).
 
-```js
-var request = new proto.mypackage.EchoRequest();
-request.setMessage(msg);
-var metadata = {'custom-header-1': 'value1'};
-var call = echoService.echo(request, metadata, function(err, response) {
-  if (err) {
-    console.log(err.code);
-    console.log(err.message);
-  } else {
-    console.log(response.getMessage());
-  }
-});
-call.on('status', function(status) {
-  console.log(status.code);
-  console.log(status.details);
-  console.log(status.metadata);
-});
-```
 
-Server-side streaming is supported!
+And that's it! We have all the code ready. Let's run the example!
 
-```js
-var stream = echoService.serverStreamingEcho(streamRequest, metadata);
-stream.on('data', function(response) {
-  console.log(response.getMessage());
-});
-stream.on('status', function(status) {
-  console.log(status.code);
-  console.log(status.details);
-  console.log(status.metadata);
-});
-stream.on('end', function(end) {
-  // stream end signal
-});
-```
+## Generate Protobuf Messages and Client Service Stub
 
-For an in-depth tutorial, see [this
-page](net/grpc/gateway/examples/echo/tutorial.md).
+To generate the protobuf messages and client service stub class from your
+`.proto` definitions, we need:
+ - the `protoc` binary, _and_
+ - the `protoc-gen-grpc-web` plugin.
 
-## Setting Deadline
+> You can download the `protoc-gen-grpc-web` protoc plugin from our
+> [release](https://github.com/grpc/grpc-web/releases) page.
+>
+> If you don't already have `protoc` installed, you will have to download it
+> first from [here](https://github.com/protocolbuffers/protobuf/releases).
+>
+> Make sure they are both executable and are discoverable from your PATH.
+>
+> For example, in MacOS, you can do:
+>
+> ```sh
+> $ sudo mv ~/Downloads/protoc-gen-grpc-web-1.2.1-darwin-x86_64 \
+>   /usr/local/bin/protoc-gen-grpc-web
+> $ sudo chmod +x /usr/local/bin/protoc-gen-grpc-web
+> ```
 
-You can set a deadline for your RPC by setting a `deadline` header. The value
-should be a Unix timestamp, in milliseconds.
 
-```js
-var deadline = new Date();
-deadline.setSeconds(deadline.getSeconds() + 1);
-
-client.sayHelloAfterDelay(request, {deadline: deadline.getTime()},
-  (err, response) => {
-    // err will be populated if the RPC exceeds the deadline
-    ...
-  });
-```
-
-## TypeScript Support
-
-The `grpc-web` module can now be imported as a TypeScript module. This is
-currently an experimental feature. Any feedback welcome!
-
-When using the `protoc-gen-grpc-web` protoc plugin, mentioned above, pass in
-either:
-
- - `import_style=commonjs+dts`: existing CommonJS style stub + `.d.ts` typings
- - `import_style=typescript`: full TypeScript output
-
-Do *not* use `import_style=typescript` for `--js_out`, it will silently be
-ignored. Instead you should use `--js_out=import_style=commonjs`, or
-`--js_out=import_style=commonjs,binary` if you are using `mode=grpcweb`. The
-`--js_out` plugin will generate JavaScript code (`echo_pb.js`), and the
-`-grpc-web_out` plugin will generate a TypeScript definition file for it
-(`echo_pb.d.ts`). This is a temporary hack until the `--js_out` supports
-TypeScript itself.
-
-For example, this is the command you should use to generate TypeScript code
-using the binary wire format
+When you have both `protoc` and `protoc-gen-grpc-web` installed, you can now
+run this command:
 
 ```sh
-$ protoc -I=$DIR echo.proto \
-  --js_out=import_style=commonjs,binary:$OUT_DIR \
-  --grpc-web_out=import_style=typescript,mode=grpcwebtext:$OUT_DIR
+$ protoc -I=. helloworld.proto \
+  --js_out=import_style=commonjs:. \
+  --grpc-web_out=import_style=commonjs,mode=grpcwebtext:.
 ```
 
-It will generate the following files:
+After the command runs successfully, you should now see two new files generated
+in the current directory:
 
-* `echo_grpc_web_pb.ts` - Generated by `--grpc-web_out`, contains the
-TypeScript gRPC-web code.
-* `echo_pb.js` - Generated by `--js_out`, contains the JavaScript Protobuf
-code.
-* `echo_pb.d.ts` - Generated by `--grpc-web_out`, contains TypeScript
-definitions for `echo_pb.js`.
+ - `helloworld_pb.js`: this contains the `HelloRequest` and `HelloReply`
+   classes
+ - `helloworld_grpc_web_pb.js`: this contains the `GreeterClient` class
+ 
+These are also the 2 files that our `client.js` file imported earlier in the
+example.
 
-```ts
-import * as grpcWeb from 'grpc-web';
-import {EchoServiceClient} from './echo_grpc_web_pb';
-import {EchoRequest, EchoResponse} from './echo_pb';
+## Compile the Client JavaScript Code
 
-const echoService = new EchoServiceClient('http://localhost:8080', null, null);
-
-const request = new EchoRequest();
-request.setMessage('Hello World!');
-
-const call = echoService.echo(request, {'custom-header-1': 'value1'},
-  (err: grpcWeb.Error, response: EchoResponse) => {
-    console.log(response.getMessage());
-  });
-call.on('status', (status: grpcWeb.Status) => {
-  // ...
-});
-```
-
-For the full TypeScript example, see
-[ts-example/client.ts](net/grpc/gateway/examples/echo/ts-example/client.ts).
-
-## Proxy Interoperability
-
-Multiple proxies support the gRPC-web protocol. The current default proxy
-is [Envoy][], which supports gRPC-web out of the box.
+Next, we need to compile the client side JavaScript code into something that
+can be consumed by the browser.
 
 ```sh
-$ docker-compose up -d node-server envoy commonjs-client
+$ npm install
+$ npx webpack client.js
 ```
 
-An alternative is to build Nginx, included as a submodule in this repository.
+Here we use `webpack` and give it an entry point `client.js`. You can also use
+`browserify` or other similar tools. This will resolve all the `require()`
+statements and produce a `./dist/main.js` file that can be embedded in our
+`index.html` file.
 
-```sh
-$ docker-compose up -d echo-server nginx closure-client
+## Run the Example!
+
+We are ready to run the Hello World example. The following set of commands will
+run the 3 processes all in the background.
+
+ 1. Run the NodeJS gRPC Service. This listens at port `:9090`.
+
+ ```sh
+ $ node server.js &
+ ```
+
+ 2. Run the Envoy proxy. The `envoy.yaml` file configures Envoy to listen to
+ browser requests at port `:8080`, and forward them to port `:9090` (see
+ above).
+
+ ```sh
+ $ docker run -d -v "$(pwd)"/envoy.yaml:/etc/envoy/envoy.yaml:ro \
+     --network=host envoyproxy/envoy:v1.15.0
+ ```
+
+> NOTE: As per [this issue](https://github.com/grpc/grpc-web/issues/436):
+> if you are running Docker on Mac/Windows, remove the `--network=host` option:
+>
+> ```sh
+> $ docker run -d -v "$(pwd)"/envoy.yaml:/etc/envoy/envoy.yaml:ro \
+>     -p 8080:8080 -p 9901:9901 envoyproxy/envoy:v1.15.0
+>  ```
+
+ 3. Run the simple Web Server. This hosts the static file `index.html` and
+ `dist/main.js` we generated earlier.
+
+ ```sh
+ $ python3 -m http.server 8081 &
+ ```
+
+When these are all ready, you can open a browser tab and navigate to
+
+```
+localhost:8081
 ```
 
-You can also try the [gRPC-web Go proxy][].
+Open up the developer console and you should see the following printed out:
 
-```sh
-$ docker-compose up -d node-server grpcwebproxy binary-client
 ```
-
-[Envoy]: https://www.envoyproxy.io
-[gRPC]: https://grpc.io
-[grpc-web-docs]: https://grpc.io/docs/languages/web
-[gRPC-web Go Proxy]: https://github.com/improbable-eng/grpc-web/tree/master/go/grpcwebproxy
-[Hello World example]: net/grpc/gateway/examples/helloworld
+Hello! World
+```
